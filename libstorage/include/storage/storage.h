@@ -67,7 +67,22 @@ extern int storage_add(storage_t *strg, oid_t *oid);
 extern int storage_remove(storage_t *strg);
 
 
-/* Starts storage requests handling */
+/* Recommended worker-stack size (bytes) for storage_run() when the device
+ * mounts a deep filesystem (ext2, jffs2, or any fs whose handler call chain
+ * recurses through block I/O). storage_run() carves all worker stacks as
+ * adjacent slices of a single malloc with no guard page, so an overflow
+ * silently clobbers the neighbouring worker's stack rather than faulting
+ * cleanly -- on the Pi 4 an 8 KB pool stack overflowed on the ext2-over-SD
+ * chain and surfaced as a bogus ext2 list-corruption crash (see the #120
+ * write-up). Pass this for deep filesystems; the bare 2*_PAGE_SIZE default is
+ * only safe for shallow block/flash handlers. Requires _PAGE_SIZE in scope
+ * (any storage_run caller already pulls it in via <sys/mman.h>). */
+#define STORAGE_DEEPFS_STACKSZ (16 * _PAGE_SIZE)
+
+
+/* Starts storage requests handling. stacksz is the per-worker stack size in
+ * bytes (required, no compiled-in default); use STORAGE_DEEPFS_STACKSZ when
+ * mounting a deep filesystem. */
 extern int storage_run(unsigned int nthreads, unsigned int stacksz);
 
 

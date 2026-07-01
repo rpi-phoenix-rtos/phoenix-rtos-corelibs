@@ -39,7 +39,7 @@ struct logger_stats_t {
 
 struct _logger_ctx_t {
 	time_t delay_milis;
-	handle_t dump_thread;
+	handle_t dump_thread, lock, cond;
 	volatile bool logger_exit;
 
 	logger_write_callback_t callbacks[LOGGER_MAX_CALLBACKS];
@@ -102,11 +102,21 @@ static void logger_thread(void *arg)
 	logger_ctx_t ctx = (logger_ctx_t)arg;
 	ssize_t size;
 	void *buffer;
-	int i;
+	int i, ret;
 
 	*(volatile int *)&ctx->dump_thread = gettid();
+	mutexLock(ctx->lock);
 
 	do {
+		/*
+		 Flush periodically, on exit make sure to flush
+		*/
+		if((ret = condWait(ctx->cond, ctx->lock, ctx->delay_milis * 1000)) < 0){
+			if(ret != -ETIME){
+				LOG_ERR("Logger thread failed (err=%d)", ret);
+				break;
+			}
+		}
 		if (ctx->rd_ptr != ctx->wr_ptr) {
 			size = ctx->wr_ptr - ctx->rd_ptr;
 			size = size < 0 ? ctx->len + size : size;
@@ -122,8 +132,8 @@ static void logger_thread(void *arg)
 			/* Cosnume data from buffer */
 			ctx->rd_ptr = (ctx->rd_ptr + size) % ctx->len;
 		}
-		usleep(ctx->delay_milis * 1000);
 	} while (!ctx->logger_exit);
+	mutexUnlock(ctx->lock);
 
 	LOG_INFO("Logger thread exit");
 
@@ -148,15 +158,15 @@ logger_ctx_t logger_init(struct logger_options_t *options)
 	ctx->wr_ptr = ctx->rd_ptr = 0;
 	ctx->delay_milis = options->delay_milis;
 
-	void *stack = malloc(LOGGER_THREAD_STACK_SIZE);
-	if (NULL == stack) {
-	}
-
 	void *logger_thread_stack = malloc(LOGGER_THREAD_STACK_SIZE);
 	if (NULL == logger_thread_stack) {
 		logger_unmap_mirrored_buffer(ctx);
+		free(ctx);
 		return NULL;
 	}
+
+	if(mutexCreate(&ctx->lock) < 0) LOG_ERR("Failed to create mutex");
+	if(condCreate(&ctx->cond) < 0) LOG_ERR("Failed to create cond");
 
 	beginthread(logger_thread, LOGGER_THREAD_PRIO,
 			(void *)logger_thread_stack, LOGGER_THREAD_STACK_SIZE, ctx);
@@ -169,6 +179,7 @@ void logger_exit(logger_ctx_t ctx)
 	ctx->logger_exit = true;
 
 	LOG_INFO("Waiting for thread to finish (tid=%d)", ctx->dump_thread);
+	condSignal(ctx->cond);
 	threadJoin(ctx->dump_thread, 0);
 
 	LOG_INFO("Trying to unmap (mirror=0x%lx), (queue=0x%lx), (size=%lu)",

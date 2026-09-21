@@ -45,6 +45,14 @@ typedef struct {
 
 cachectx_t *cache_init(size_t srcMemSize, size_t lineSize, size_t linesCnt, const cache_ops_t *ops);
 
+
+/* Sets the write-back granularity: a flush writes only the modified part of a
+ * line, rounded out to `gran` bytes. `gran` must be a power of two and no
+ * larger than the line size, and the write callback must accept an offset and
+ * length that are multiples of it. Optional -- a cache that never calls this
+ * writes whole lines, as it always did. Returns 0, or -EINVAL. */
+int cache_setFlushGranularity(cachectx_t *cache, size_t gran);
+
 int cache_deinit(cachectx_t *cache);
 
 

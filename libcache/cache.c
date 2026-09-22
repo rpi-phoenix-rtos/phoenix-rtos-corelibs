@@ -489,6 +489,8 @@ ssize_t cache_write(cachectx_t *cache, uint64_t addr, const void *buffer, size_t
 
 		linePtr = cache_findLine(&cache->sets[index], tag, LIBCACHE_TIMESTAMPS_UPDATE);
 
+		int contentsKnown = 1;
+
 		/* cache miss */
 		if (linePtr == NULL) {
 			linePtr = cache_allocateLine(cache, index, tag);
@@ -506,8 +508,28 @@ ssize_t cache_write(cachectx_t *cache, uint64_t addr, const void *buffer, size_t
 					break;
 				}
 			}
+			else {
+				contentsKnown = 0;
+			}
 		}
 		/* cache hit */
+		/* A write that stores bytes the line already holds changes nothing, so
+		 * neither dirty it nor push it to the device -- measured as 2 of the 3
+		 * device commands an in-place ext2 overwrite costs (the superblock, and
+		 * the inode whose mtime has 1-second resolution).
+		 *
+		 * Only valid when the line's contents are known: on a full-line miss
+		 * the fetch is deliberately skipped above, so linePtr->data is
+		 * uninitialised and must not be compared. */
+		if (contentsKnown &&
+				(memcmp((const unsigned char *)linePtr->data + offset,
+						(const unsigned char *)buffer + position, tempCount) == 0)) {
+			position += tempCount;
+			left -= tempCount;
+			addr += cache->lineSize;
+			continue;
+		}
+
 		memcpy((unsigned char *)linePtr->data + offset, (const unsigned char *)buffer + position, tempCount);
 
 		if ((size_t)offset < linePtr->dirtyStart) {

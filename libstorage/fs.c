@@ -152,6 +152,10 @@ void storage_fsHandler(void *data, msg_t *msg)
 			break;
 
 		case mtReaddir:
+			if (((msg->i.readdir.flags & MSG_READDIR_NEXT) != 0U) && (fs->ops->readdirNext != NULL)) {
+				msg->o.err = fs->ops->readdirNext(fs->info, &msg->oid, msg->i.readdir.offs, msg->o.data, msg->o.size, &msg->o.readdir.next);
+				break;
+			}
 			if (fs->ops->readdir == NULL) {
 				msg->o.err = -ENOSYS;
 				break;

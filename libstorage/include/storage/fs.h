@@ -44,6 +44,10 @@ typedef struct {
 	int (*readdir)(void *info, oid_t *oid, off_t offs, struct dirent *dent, size_t size);
 	int (*statfs)(void *info, void *buf, size_t len);
 	int (*sync)(void *info, oid_t *oid);
+
+	/* Optional: readdir that also stores the position of the following entry
+	 * in *next, for a client that asks for it (MSG_READDIR_NEXT) */
+	int (*readdirNext)(void *info, oid_t *oid, off_t offs, struct dirent *dent, size_t size, off_t *next);
 } storage_fsops_t;
 
 
